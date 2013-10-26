@@ -17,6 +17,26 @@
 @end
 
 @implementation OWOuterSpaceTableViewController
+#define ADDED_SPACE_OBJECTS_KEY @"Added Space Objects Array"
+
+#pragma mark - Lazy Instantiation of Properties
+
+/* Lazy instantiation. We use the getter to set the instance variable with a value. If the developer accesses the planets property the getter will be called and if no object has been assigned one will be assigned. */
+-(NSMutableArray *)planets
+{
+    if (!_planets){
+        _planets = [[NSMutableArray alloc] init];
+    }
+    return _planets;
+}
+
+-(NSMutableArray *)addedSpaceObjects
+{
+    if (!_addedSpaceObjects){
+        _addedSpaceObjects = [[NSMutableArray alloc] init];
+    }
+    return _addedSpaceObjects;
+}
 
 - (id)initWithStyle:(UITableViewStyle)style
 {
@@ -37,15 +57,19 @@
     // Uncomment the following line to display an Edit button in the navigation bar for this view controller.
     // self.navigationItem.rightBarButtonItem = self.editButtonItem;
     
-    /* Allocate and initialize our planets array */
-    self.planets = [[NSMutableArray alloc] init];
-
     /* Use fast enumeration to iterate through all NSMutableDictionaries in the array returned from the class method allKnownPlanets. First create an NSString with the planet's file name. Use a format string to add the .jpg extension to each planet name. Create a OWSpace object and use the custom initializer initWithData. Pass in both the dictionary and a UIImage object. Add the planet object to the planets array. */
     for (NSMutableDictionary *planetData in [AstronomicalData allKnownPlanets])
     {
         NSString *imageName = [NSString stringWithFormat:@"%@.jpg", planetData[PLANET_NAME]];
         OWSpaceObject *planet = [[OWSpaceObject alloc] initWithData:planetData andImage:[UIImage imageNamed:imageName]];
         [self.planets addObject:planet];
+    }
+    
+    /* Access the saved array in NSUserDefaults. Use fast enumeration to iterate through the returned array. Add the OWSpaceObjects to the addedSpaceObjects array. In order to get the OWSpaceObject use the method spaceObjectForDictionary to convert the NSDictionaries in the myPlanetsAsPropertyLists array to OWSpaceObjects. */
+    NSArray *myPlanetsAsPropertyLists = [[NSUserDefaults standardUserDefaults] arrayForKey:ADDED_SPACE_OBJECTS_KEY];
+    for (NSDictionary *dictionary in myPlanetsAsPropertyLists){
+        OWSpaceObject *spaceObject = [self spaceObjectForDictionary:dictionary];
+        [self.addedSpaceObjects addObject:spaceObject];
     }
 }
 
@@ -59,7 +83,15 @@
         {
             OWSpaceImageViewController *nextViewController = segue.destinationViewController;
             NSIndexPath *path = [self.tableView indexPathForCell:sender];
-            OWSpaceObject *selectedObject = self.planets[path.row];
+            OWSpaceObject *selectedObject;
+            
+            if (path.section == 0){
+                selectedObject = self.planets[path.row];
+            }
+            else if (path.section == 1){
+                selectedObject = self.addedSpaceObjects[path.row];
+            }
+            
             nextViewController.spaceObject = selectedObject;
         }
     }
@@ -72,9 +104,22 @@
         {
             OWSpaceDataViewController *targetViewController = segue.destinationViewController;
             NSIndexPath *path = sender;
-            OWSpaceObject *selectedObject = self.planets[path.row];
+            OWSpaceObject *selectedObject;
+            if (path.section == 0){
+                selectedObject = self.planets[path.row];
+            }
+            else if (path.section == 1){
+                selectedObject = self.addedSpaceObjects[path.row];
+            }
+            
             targetViewController.spaceObject = selectedObject;
         }
+    }
+    
+    /* If the destination ViewController is the addSpaceObjectVC we create a variable that points to the OWAddSpaceObjectViewController instance. With this instance we can set the delegate property so that the OWAddSpaceObjectViewController can call the methods defined in its' protocol. */
+    if ([segue.destinationViewController isKindOfClass:[OWAddSpaceObjectViewController class]]){
+        OWAddSpaceObjectViewController *addSpaceObjectVC = segue.destinationViewController;
+        addSpaceObjectVC.delegate = self;
     }
 }
 
@@ -84,20 +129,79 @@
     // Dispose of any resources that can be recreated.
 }
 
+#pragma mark - OWAddSpaceObjectViewController Delegate
+
+/* Delegate method defined in the OWAddSpaceObjectViewController Protocol. This method dismisses the instance of the OWAddSpaceObjectViewController and presents the OWOuterSpaceTableViewController*/
+-(void)didCancel
+{
+    NSLog(@"didCancel");
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+/* Delegate method defined in the OWAddSpaceObjectViewController Protocol. First create an NSMutableArray and set it's value equal to a query to NSUserDefaults. Notice that we use the define as our key. We also make the returned NSArray mutable with the mutableCopy method. If the return value does not return an NSArray we need to create NSMutableArray object. Next we added our new space object to the NSMutableArray. Before adding the space object we use the method spaceObjectAsAPropertyList to convert our spaceObject into a plist. We can now added our NSMutableArray to NSUserDefaults and synchronize it. After we have updated our NSUserDefaults dismiss OWAddSpaceObjectViewController. Finally, we reload the information in the tableView. */
+-(void)addSpaceObject:(OWSpaceObject *)spaceObject
+{
+    [self.addedSpaceObjects addObject:spaceObject];
+    
+    // Will save to NSUserDefaults here
+    NSMutableArray *spaceObjectsAsPropertyLists = [[[NSUserDefaults standardUserDefaults] arrayForKey:ADDED_SPACE_OBJECTS_KEY] mutableCopy];
+    if(!spaceObjectsAsPropertyLists) spaceObjectsAsPropertyLists = [[NSMutableArray alloc] init];
+    
+    [spaceObjectsAsPropertyLists addObject:[self spaceObjectAsAPropertyList:spaceObject]];
+    [[NSUserDefaults standardUserDefaults] setObject:spaceObjectsAsPropertyLists forKey:ADDED_SPACE_OBJECTS_KEY];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    
+    [self dismissViewControllerAnimated:YES completion:nil];
+    
+    [self.tableView reloadData];
+}
+
+#pragma mark - Helper Methods
+
+/* Helper method which takes a OWSpace Object and convert it to an NSDictionary with items that can be persisted to NSUserDefaults. In order to save the UIImage we first conver it to an NSData Object using the function UIImagePNGRepersentation. Notice the use of literal syntax to create the NSDictionary object. We also use the defines to ensure that the key names are accurate. */
+-(NSDictionary *)spaceObjectAsAPropertyList:(OWSpaceObject *)spaceObject
+{
+    NSData *imageData = UIImagePNGRepresentation(spaceObject.spaceImage);
+    NSDictionary *dictionary = @{PLANET_NAME : spaceObject.name, PLANET_GRAVITY : @(spaceObject.gravitationalForce), PLANET_DIAMETER : @(spaceObject.diameter), PLANET_YEAR_LENGTH : @(spaceObject.yearLength), PLANET_DAY_LENGTH : @(spaceObject.dayLength), PLANET_TEMPERATURE : @(spaceObject.temperature), PLANET_NUMBER_OF_MOONS : @(spaceObject.numberOfMoons), PLANET_NICKNAME : spaceObject.nickname, PLANET_INTERESTING_FACT : spaceObject.interestFact, PLANET_IMAGE : imageData };
+    
+    return dictionary;
+}
+
+/* This helper method takes an NSDictionary of Space Object information and returns a OWSpaceObject. We first create an NSDate object by accessing our dictionary. We create a UIImage object using the class method imageWithData. Luckily the custom initializer we previously setup */
+-(OWSpaceObject *)spaceObjectForDictionary:(NSDictionary *)dictionary
+{
+    NSData *dataForImage = dictionary[PLANET_IMAGE];
+    UIImage *spaceObjectImage = [UIImage imageWithData:dataForImage];
+    OWSpaceObject *spaceObject = [[OWSpaceObject alloc] initWithData:dictionary andImage:spaceObjectImage];
+    return spaceObject;
+}
+
 #pragma mark - Table view data source
 
+/* If the addedSpaceObjects array contains any objects create 2 sections. If the addedSpaceObjects array is empty only create 1 section. */
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
 #warning Potentially incomplete method implementation.
     // Return the number of sections.
-    return 1;
+    if ([self.addedSpaceObjects count]){
+        return 2;
+    }
+    else {
+        return 1;
+    }
 }
 
+/* If the section is the second section the number of rows should be equal to the count of the addedSpaceObjects Array. Otherwise the section is the first section and the number of rows should be equal the number of objects in the planets array */
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
 #warning Incomplete method implementation.
     // Return the number of rows in the section.
-    return [self.planets count];
+    if (section == 1){
+        return [self.addedSpaceObjects count];
+    }
+    else {
+        return [self.planets count];
+    }
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
@@ -107,12 +211,20 @@
     
     // Configure the cell...
     
-    /* Access the OWSpaceObject from our planets array. Use the OWSpaceObject's properties to update the cell's properties.*/
-    OWSpaceObject *planet = [self.planets objectAtIndex:indexPath.row];
-    cell.textLabel.text = planet.name;
-    cell.detailTextLabel.text = planet.nickname;
-    cell.imageView.image = planet.spaceImage;
-    
+    if (indexPath.section == 1){
+        //Use new Space object to customize our cell
+        OWSpaceObject *planet = [self.addedSpaceObjects objectAtIndex:indexPath.row];
+        cell.textLabel.text = planet.name;
+        cell.detailTextLabel.text = planet.nickname;
+        cell.imageView.image = planet.spaceImage;
+    }
+    else {
+        /* Access the OWSpaceObject from our planets array. Use the OWSpaceObject's properties to update the cell's properties.*/
+        OWSpaceObject *planet = [self.planets objectAtIndex:indexPath.row];
+        cell.textLabel.text = planet.name;
+        cell.detailTextLabel.text = planet.nickname;
+        cell.imageView.image = planet.spaceImage;
+    }
     /* Customize the appearence of the TableViewCells. */
     cell.backgroundColor = [UIColor clearColor];
     cell.textLabel.textColor = [UIColor whiteColor];
